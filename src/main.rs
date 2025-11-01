@@ -27,6 +27,7 @@ enum Proto {
     Udp,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct PortProc {
     proto: Proto,
@@ -76,23 +77,55 @@ fn fetch_ss_output() -> anyhow::Result<String> {
 }
 
 fn scan_ports(output: String) -> Vec<PortProc> {
-    println!("{}", output);
-    let pp = vec![
-        PortProc {
-            proto: Proto::Udp,
-            local_address: String::from("224.0.0.251:5353"),
-            pid: 123,
-            proc_name: String::from("chromium"),
-            state: Some("UNCONN".to_string()),
-        },
-        PortProc {
-            proto: Proto::Tcp,
-            local_address: String::from("127.0.0.1:6000"),
-            pid: 123,
-            proc_name: String::from("FakeProc"),
-            state: Some("LISTEN".to_string()),
-        },
-    ];
+    let mut results: Vec<PortProc> = Vec::new();
 
-    pp
+    for line in output.lines() {
+        // Skip header
+        if line.starts_with("Netid") {
+            continue;
+        }
+
+        // Skip lines without process info
+        if !line.contains("users:((") {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+
+        let (proc_name, pid) = if let Some(info) = parse_process_info(parts[6]) {
+            info
+        } else {
+            // Skip line if parse failed
+            continue;
+        };
+
+        let p = PortProc {
+            proto: if parts[0] == "tcp" {
+                Proto::Tcp
+            } else {
+                Proto::Udp
+            },
+            local_address: parts[4].to_string(),
+            pid,
+            proc_name,
+            state: Some(parts[1].to_string()),
+        };
+
+        results.push(p);
+    }
+
+    results
+}
+
+fn parse_process_info(proc_str: &str) -> Option<(String, u32)> {
+    let name_start = proc_str.find("((\"")? + 3;
+    let name_end = proc_str[name_start..].find("\",")?;
+    let proc_name = &proc_str[name_start..name_start + name_end];
+
+    let pid_start = proc_str.find("pid=")? + 4;
+    let pid_end = proc_str[pid_start..].find(",")?;
+    let pid_str = &proc_str[pid_start..pid_start + pid_end];
+    let pid = pid_str.parse::<u32>().ok()?;
+
+    Some((proc_name.to_string(), pid))
 }
