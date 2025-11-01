@@ -129,3 +129,35 @@ fn parse_process_info(proc_str: &str) -> Option<(String, u32)> {
 
     Some((proc_name.to_string(), pid))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_process_info_success() {
+        let proc_str = "users:((\"chromium\",pid=2440,fd=237))";
+        let proc_name = String::from("chromium");
+        let pid: u32 = 2440;
+
+        assert_eq!(parse_process_info(proc_str), Some((proc_name, pid)));
+    }
+
+    #[test]
+    fn parse_process_info_from_empty_string() {
+        let proc_str = "";
+        assert_eq!(parse_process_info(proc_str), None);
+    }
+
+    #[test]
+    fn parse_process_info_invalid_structure() {
+        let proc_str = "users:\"chromium\",pid=2440,fd=237";
+        assert_eq!(parse_process_info(proc_str), None);
+    }
+
+    #[test]
+    fn parse_process_info_invalid_pid() {
+        let proc_str = "users:((\"chromium\",pid=abc,fd=237))";
+        assert_eq!(parse_process_info(proc_str), None);
+    }
+}
