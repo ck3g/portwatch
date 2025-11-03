@@ -130,6 +130,13 @@ fn parse_process_info(proc_str: &str) -> Option<(String, u32)> {
     Some((proc_name.to_string(), pid))
 }
 
+#[allow(dead_code)]
+fn extract_port(local_address: &str) -> Option<u16> {
+    local_address
+        .rsplit_once(":")
+        .and_then(|(_, port_str)| port_str.parse::<u16>().ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +206,14 @@ tcp         LISTEN       0            1024                               [::1]:3
         assert_eq!(results[3].pid, 27264);
         assert_eq!(results[3].proc_name, "ruby");
         assert_eq!(results[3].state, Some("LISTEN".to_string()));
+    }
+
+    #[test]
+    fn extract_port_from_local_address() {
+        assert_eq!(extract_port(""), None);
+        assert_eq!(extract_port("224.0.0.251:5353"), Some(5353));
+        assert_eq!(extract_port("[::1]:3000"), Some(3000));
+        assert_eq!(extract_port("224.0.0.251:abcd"), None);
+        assert_eq!(extract_port("invalid-address"), None);
     }
 }
