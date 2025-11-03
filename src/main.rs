@@ -21,7 +21,7 @@ struct Args {
     interval: Option<u32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Proto {
     Tcp,
     Udp,
@@ -134,6 +134,16 @@ fn parse_process_info(proc_str: &str) -> Option<(String, u32)> {
 mod tests {
     use super::*;
 
+    const SAMPLE_SS_OUTPUT: &str = r#"Netid       State        Recv-Q       Send-Q                     Local Address:Port                Peer Address:Port       Process
+udp         UNCONN       0            0                            224.0.0.251:5353                     0.0.0.0:*           users:(("chromium",pid=2440,fd=208))
+udp         UNCONN       0            0                            224.0.0.251:5353                     0.0.0.0:*           users:(("chromium",pid=2523,fd=57))
+udp         UNCONN       0            0                          127.0.0.53%lo:53                       0.0.0.0:*
+udp         UNCONN       0            0                    192.168.1.148%wlan0:68                       0.0.0.0:*
+tcp         LISTEN       0            4096                           127.0.0.1:45549                    0.0.0.0:*
+tcp         LISTEN       0            1024                           127.0.0.1:3000                     0.0.0.0:*           users:(("ruby",pid=27264,fd=6))
+tcp         LISTEN       0            1024                               [::1]:3000                        [::]:*           users:(("ruby",pid=27264,fd=7))
+"#;
+
     #[test]
     fn parse_process_info_success() {
         let proc_str = "users:((\"chromium\",pid=2440,fd=237))";
@@ -159,5 +169,35 @@ mod tests {
     fn parse_process_info_invalid_pid() {
         let proc_str = "users:((\"chromium\",pid=abc,fd=237))";
         assert_eq!(parse_process_info(proc_str), None);
+    }
+
+    #[test]
+    fn scan_ports_with_multiple_entries() {
+        let results = scan_ports(SAMPLE_SS_OUTPUT.to_string());
+        assert_eq!(results.len(), 4);
+
+        assert_eq!(results[0].proto, Proto::Udp);
+        assert_eq!(results[0].local_address, "224.0.0.251:5353");
+        assert_eq!(results[0].pid, 2440);
+        assert_eq!(results[0].proc_name, "chromium");
+        assert_eq!(results[0].state, Some("UNCONN".to_string()));
+
+        assert_eq!(results[1].proto, Proto::Udp);
+        assert_eq!(results[1].local_address, "224.0.0.251:5353");
+        assert_eq!(results[1].pid, 2523);
+        assert_eq!(results[1].proc_name, "chromium");
+        assert_eq!(results[1].state, Some("UNCONN".to_string()));
+
+        assert_eq!(results[2].proto, Proto::Tcp);
+        assert_eq!(results[2].local_address, "127.0.0.1:3000");
+        assert_eq!(results[2].pid, 27264);
+        assert_eq!(results[2].proc_name, "ruby");
+        assert_eq!(results[2].state, Some("LISTEN".to_string()));
+
+        assert_eq!(results[3].proto, Proto::Tcp);
+        assert_eq!(results[3].local_address, "[::1]:3000");
+        assert_eq!(results[3].pid, 27264);
+        assert_eq!(results[3].proc_name, "ruby");
+        assert_eq!(results[3].state, Some("LISTEN".to_string()));
     }
 }
