@@ -51,7 +51,9 @@ fn main() {
 fn handle_once() {
     match fetch_ss_output() {
         Ok(stdout) => {
-            let pp = scan_ports(stdout);
+            let mut pp = scan_ports(stdout);
+            pp.sort_by_key(|p| extract_port(&p.local_address));
+
             for p in pp {
                 println!("{:?}", p);
             }
@@ -130,7 +132,6 @@ fn parse_process_info(proc_str: &str) -> Option<(String, u32)> {
     Some((proc_name.to_string(), pid))
 }
 
-#[allow(dead_code)]
 fn extract_port(local_address: &str) -> Option<u16> {
     local_address
         .rsplit_once(":")
