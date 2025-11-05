@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::Parser;
+use std::fmt;
 use std::process::Command;
 
 #[derive(Parser, Debug)]
@@ -25,6 +26,16 @@ struct Args {
 enum Proto {
     Tcp,
     Udp,
+}
+
+impl fmt::Display for Proto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Proto::Tcp => "TCP",
+            Proto::Udp => "UDP",
+        };
+        f.pad(s)
+    }
 }
 
 #[allow(dead_code)]
@@ -54,9 +65,7 @@ fn handle_once() {
             let mut pp = scan_ports(stdout);
             pp.sort_by_key(|p| extract_port(&p.local_address));
 
-            for p in pp {
-                println!("{:?}", p);
-            }
+            render_table(&pp);
         }
         Err(err) => eprintln!("scan failed: {err}"),
     }
@@ -138,6 +147,56 @@ fn extract_port(local_address: &str) -> Option<u16> {
         .and_then(|(_, port_str)| port_str.parse::<u16>().ok())
 }
 
+fn render_table(items: &[PortProc]) {
+    if items.is_empty() {
+        println!("No listening ports found.");
+        return;
+    }
+
+    let reverse = "\x1b[7m"; // reverse colors (swap background and foreground)
+    let reset = "\x1b[0m"; // reset to normal
+
+    let max_proc_len = items
+        .iter()
+        .map(|p| p.proc_name.len())
+        .max()
+        .unwrap_or(7)
+        .max(7);
+
+    println!(
+        "{}{:<6} {:>6} {:<10} {:>20} {:<8} {:<width$}{}",
+        reverse, //start background
+        "PROTO",
+        "PID",
+        "STATE",
+        "ADDRESS",
+        "PORT",
+        "PROCESS",
+        reset, //end background
+        width = max_proc_len
+    );
+
+    for item in items {
+        let state_str = item.state.as_deref().unwrap_or("");
+        let port_str = extract_port(&item.local_address).map_or("?".to_string(), |p| p.to_string());
+        let local_address = item
+            .local_address
+            .rsplit_once(":")
+            .map(|(addr, _)| addr)
+            .unwrap_or(&item.local_address);
+        println!(
+            "{:<6} {:>6} {:<10} {:>20} {:<8} {:<width$}",
+            item.proto,
+            item.pid,
+            state_str,
+            local_address,
+            port_str,
+            item.proc_name,
+            width = max_proc_len
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +210,18 @@ tcp         LISTEN       0            4096                           127.0.0.1:4
 tcp         LISTEN       0            1024                           127.0.0.1:3000                     0.0.0.0:*           users:(("ruby",pid=27264,fd=6))
 tcp         LISTEN       0            1024                               [::1]:3000                        [::]:*           users:(("ruby",pid=27264,fd=7))
 "#;
+
+    #[test]
+    fn proto_display() {
+        assert_eq!(Proto::Tcp.to_string(), "TCP");
+        assert_eq!(Proto::Udp.to_string(), "UDP");
+    }
+
+    #[test]
+    fn proto_display_with_width() {
+        assert_eq!(format!("{:<6}", Proto::Tcp), "TCP   ");
+        assert_eq!(format!("{:>6}", Proto::Udp), "   UDP");
+    }
 
     #[test]
     fn parse_process_info_success() {
