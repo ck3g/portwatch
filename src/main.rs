@@ -1,7 +1,21 @@
 use anyhow::Context;
 use clap::Parser;
 use std::fmt;
+use std::io::{self, Write};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+struct CleanupGuard;
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        exit_alternate_screen();
+        handle_once();
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Monitor which processes are bound to which ports", long_about = None)]
@@ -53,7 +67,7 @@ fn main() {
     if cli.once {
         handle_once();
     } else if let Some(interval) = cli.interval {
-        println!("Running --interval with {} seconds", interval);
+        handle_interval(interval);
     } else {
         println!("Running default");
     }
@@ -69,6 +83,51 @@ fn handle_once() {
         }
         Err(err) => eprintln!("scan failed: {err}"),
     }
+}
+
+fn handle_interval(interval: u32) {
+    let _cleanup = CleanupGuard; // cleanup on Drop
+
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl+C handler");
+
+    enter_alternate_screen();
+
+    while running.load(Ordering::SeqCst) {
+        clear_screen();
+        handle_once();
+        interruptable_sleep(interval, &running);
+    }
+}
+
+fn interruptable_sleep(duration_secs: u32, running: &Arc<AtomicBool>) {
+    let iterations = duration_secs * 10;
+    for _ in 0..iterations {
+        if !running.load(Ordering::SeqCst) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn clear_screen() {
+    print!("\x1b[H\x1b[2J");
+    io::stdout().flush().unwrap(); // Force output immediately
+}
+
+fn enter_alternate_screen() {
+    print!("\x1b[?1049h"); // Enter alternate screen
+    std::io::stdout().flush().unwrap();
+}
+
+fn exit_alternate_screen() {
+    print!("\x1b[?1049l"); // Exit alternate screen (restores previous content)
+    std::io::stdout().flush().unwrap();
 }
 
 fn fetch_ss_output() -> anyhow::Result<String> {
