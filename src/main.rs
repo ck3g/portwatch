@@ -1,12 +1,14 @@
 use anyhow::Context;
 use clap::Parser;
-use std::fmt;
 use std::io::{self, Write};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+mod types;
+use types::{PortProc, Proto};
 
 struct CleanupGuard;
 
@@ -34,32 +36,6 @@ struct Args {
         conflicts_with="once"
     )]
     interval: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Proto {
-    Tcp,
-    Udp,
-}
-
-impl fmt::Display for Proto {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Proto::Tcp => "TCP",
-            Proto::Udp => "UDP",
-        };
-        f.pad(s)
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct PortProc {
-    proto: Proto,
-    local_address: String,
-    pid: u32,
-    proc_name: String,
-    state: Option<String>,
 }
 
 fn main() {
@@ -269,18 +245,6 @@ tcp         LISTEN       0            4096                           127.0.0.1:4
 tcp         LISTEN       0            1024                           127.0.0.1:3000                     0.0.0.0:*           users:(("ruby",pid=27264,fd=6))
 tcp         LISTEN       0            1024                               [::1]:3000                        [::]:*           users:(("ruby",pid=27264,fd=7))
 "#;
-
-    #[test]
-    fn proto_display() {
-        assert_eq!(Proto::Tcp.to_string(), "TCP");
-        assert_eq!(Proto::Udp.to_string(), "UDP");
-    }
-
-    #[test]
-    fn proto_display_with_width() {
-        assert_eq!(format!("{:<6}", Proto::Tcp), "TCP   ");
-        assert_eq!(format!("{:>6}", Proto::Udp), "   UDP");
-    }
 
     #[test]
     fn parse_process_info_success() {
