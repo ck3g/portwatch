@@ -16,7 +16,6 @@ impl fmt::Display for Proto {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PortProc {
     pub proto: Proto,
