@@ -1,5 +1,6 @@
 mod display;
 mod parser;
+mod tui;
 mod types;
 
 use clap::Parser;
@@ -45,8 +46,8 @@ fn main() {
         handle_once();
     } else if let Some(interval) = cli.interval {
         handle_interval(interval);
-    } else {
-        println!("Running default");
+    } else if let Err(e) = tui::run_tui() {
+        eprintln!("TUI error: {}", e);
     }
 }
 
