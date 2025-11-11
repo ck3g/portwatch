@@ -86,12 +86,12 @@ fn render(frame: &mut Frame, app: &App) {
     let table = Table::new(
         rows,
         vec![
-            Constraint::Length(6),
-            Constraint::Length(6),
-            Constraint::Length(10),
-            Constraint::Length(20),
-            Constraint::Length(8),
-            Constraint::Length(15),
+            Constraint::Length(6),      // PROTO
+            Constraint::Length(6),      // PID
+            Constraint::Min(10),        // STATE
+            Constraint::Percentage(30), // ADDRESS
+            Constraint::Length(8),      // PORT
+            Constraint::Percentage(40), // PROCESS
         ],
     )
     .header(header)
