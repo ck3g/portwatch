@@ -13,6 +13,12 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 
+const REFRESH_INTERVAL_SEC: u64 = 5;
+const POLL_TIMEOUT_MS: u64 = 100;
+const HIGHLIGHT_BG_COLOR: Color = Color::Indexed(236);
+const HIGHLIGHT_SYMBOL: &str = "→ ";
+const TITLE: &str = " PortWatch ";
+
 struct App {
     items: Vec<PortProc>,
     selected: usize,
@@ -42,6 +48,14 @@ impl App {
             self.selected - 1
         }
     }
+
+    fn refresh_items(&mut self, new_items: Vec<PortProc>) {
+        self.items = new_items;
+
+        if !self.items.is_empty() && self.selected >= self.items.len() {
+            self.selected = self.items.len() - 1;
+        }
+    }
 }
 
 pub fn run_tui() -> Result<()> {
@@ -53,17 +67,18 @@ pub fn run_tui() -> Result<()> {
 
 fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
     let output = fetch_ss_output()?;
-    let items = scan_ports(output);
+    let mut items = scan_ports(output);
+    items.sort_by_key(|p| extract_port(&p.local_address));
 
     let mut app = App { items, selected: 0 };
     let mut last_refresh = Instant::now();
-    let refresh_interval = Duration::from_secs(5);
+    let refresh_interval = Duration::from_secs(REFRESH_INTERVAL_SEC);
 
     loop {
         terminal.draw(|frame| render(frame, &app))?;
 
         // Poll with timeout (non-blocking)
-        if event::poll(Duration::from_millis(100))?
+        if event::poll(Duration::from_millis(POLL_TIMEOUT_MS))?
             && let Event::Key(key) = event::read()?
         {
             match key.code {
@@ -76,7 +91,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
         if last_refresh.elapsed() >= refresh_interval {
             let output = fetch_ss_output()?;
-            app.items = scan_ports(output);
+            let mut new_items = scan_ports(output);
+            new_items.sort_by_key(|p| extract_port(&p.local_address));
+            app.refresh_items(new_items);
             last_refresh = Instant::now();
         }
     }
@@ -136,11 +153,11 @@ fn render(frame: &mut Frame, app: &App) {
         ],
     )
     .header(header)
-    .row_highlight_style(Style::default().bg(Color::Indexed(236)))
-    .highlight_symbol("→ ")
+    .row_highlight_style(Style::default().bg(HIGHLIGHT_BG_COLOR))
+    .highlight_symbol(HIGHLIGHT_SYMBOL)
     .block(
         Block::default()
-            .title_top(Line::from(" PortWatch ").centered())
+            .title_top(Line::from(TITLE).centered())
             .title_bottom(Line::from(title_bottom).centered())
             .borders(Borders::ALL),
     );
@@ -222,6 +239,18 @@ mod tests {
             selected: 0,
         };
         app.previous();
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_refresh_items() {
+        let mut app = App {
+            items: vec![mock_port_proc(), mock_port_proc(), mock_port_proc()],
+            selected: 2,
+        };
+        let new_items: Vec<PortProc> = vec![mock_port_proc(), mock_port_proc()];
+        app.refresh_items(new_items);
+        assert_eq!(app.items.len(), 2);
         assert_eq!(app.selected, 1);
     }
 }
