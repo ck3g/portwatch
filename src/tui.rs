@@ -5,18 +5,43 @@ use crate::{
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
-    layout::{Alignment, Constraint},
-    style::{Modifier, Style},
-    text::{Line, Text},
-    widgets::{Block, Borders, Cell, Row, Table},
     Frame,
+    layout::{Alignment, Constraint},
+    style::{Color, Modifier, Style},
+    text::{Line, Text},
+    widgets::{Block, Borders, Cell, Row, Table, TableState},
 };
 use std::time::{Duration, Instant};
 
 struct App {
     items: Vec<PortProc>,
-    #[allow(dead_code)]
     selected: usize,
+}
+
+impl App {
+    fn next(&mut self) {
+        if self.items.is_empty() {
+            return;
+        }
+
+        self.selected = if self.selected == self.items.len() - 1 {
+            0
+        } else {
+            self.selected + 1
+        }
+    }
+
+    fn previous(&mut self) {
+        if self.items.is_empty() {
+            return;
+        }
+
+        self.selected = if self.selected == 0 {
+            self.items.len() - 1
+        } else {
+            self.selected - 1
+        }
+    }
 }
 
 pub fn run_tui() -> Result<()> {
@@ -38,9 +63,13 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         terminal.draw(|frame| render(frame, &app))?;
 
         // Poll with timeout (non-blocking)
-        if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) if key.code == KeyCode::Char('q') => break,
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') => break,
+                KeyCode::Up | KeyCode::Char('k') => app.previous(),
+                KeyCode::Down | KeyCode::Char('j') => app.next(),
                 _ => {}
             }
         }
@@ -90,7 +119,10 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let title_bottom = format!(" {} processes | q: quit | ↑↓: navigate ", app.items.len());
+    let title_bottom = format!(
+        " {} processes | ↑↓ or j/k: navigate | q: quit ",
+        app.items.len()
+    );
 
     let table = Table::new(
         rows,
@@ -104,6 +136,8 @@ fn render(frame: &mut Frame, app: &App) {
         ],
     )
     .header(header)
+    .row_highlight_style(Style::default().bg(Color::Indexed(236)))
+    .highlight_symbol("→ ")
     .block(
         Block::default()
             .title_top(Line::from(" PortWatch ").centered())
@@ -111,5 +145,83 @@ fn render(frame: &mut Frame, app: &App) {
             .borders(Borders::ALL),
     );
 
-    frame.render_widget(table, frame.area());
+    let mut table_state = TableState::default().with_selected(Some(app.selected));
+
+    frame.render_stateful_widget(table, frame.area(), &mut table_state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{PortProc, Proto};
+
+    fn mock_port_proc() -> PortProc {
+        PortProc {
+            proto: Proto::Tcp,
+            local_address: "127.0.0.1:3000".to_string(),
+            pid: 1234,
+            proc_name: "test".to_string(),
+            state: Some("LISTEN".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_next_empty_list() {
+        let mut app = App {
+            items: vec![],
+            selected: 0,
+        };
+        app.next();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_next() {
+        let mut app = App {
+            items: vec![mock_port_proc(), mock_port_proc()],
+            selected: 0,
+        };
+        app.next();
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_next_wraps_around() {
+        let mut app = App {
+            items: vec![mock_port_proc(), mock_port_proc()],
+            selected: 1,
+        };
+        app.next();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_previous_empty_list() {
+        let mut app = App {
+            items: vec![],
+            selected: 0,
+        };
+        app.previous();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_previous() {
+        let mut app = App {
+            items: vec![mock_port_proc(), mock_port_proc()],
+            selected: 1,
+        };
+        app.previous();
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn test_previous_wraps_around() {
+        let mut app = App {
+            items: vec![mock_port_proc(), mock_port_proc()],
+            selected: 0,
+        };
+        app.previous();
+        assert_eq!(app.selected, 1);
+    }
 }
