@@ -6,7 +6,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     layout::{Alignment, Constraint},
-    style::{Color, Style},
+    style::{Modifier, Style},
     text::{Line, Text},
     widgets::{Block, Borders, Cell, Row, Table},
     Frame,
@@ -56,7 +56,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 }
 
 fn render(frame: &mut Frame, app: &App) {
-    let header_style = Style::default().fg(Color::Black).bg(Color::White);
+    let header_style = Style::default().add_modifier(Modifier::REVERSED);
     let header = Row::new(vec![
         Cell::from("PROTO"),
         Cell::from(Text::from("PID").alignment(Alignment::Right)),
