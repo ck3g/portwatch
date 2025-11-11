@@ -5,10 +5,10 @@ use crate::{
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
-    layout::Constraint,
+    layout::{Alignment, Constraint},
     style::{Color, Style},
-    text::Line,
-    widgets::{Block, Borders, Row, Table},
+    text::{Line, Text},
+    widgets::{Block, Borders, Cell, Row, Table},
     Frame,
 };
 use std::time::{Duration, Instant};
@@ -57,9 +57,16 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
 fn render(frame: &mut Frame, app: &App) {
     let header_style = Style::default().fg(Color::Black).bg(Color::White);
-    let header = Row::new(vec!["PROTO", "PID", "STATE", "ADDRESS", "PORT", "PROCESS"])
-        .style(header_style)
-        .height(1);
+    let header = Row::new(vec![
+        Cell::from("PROTO"),
+        Cell::from(Text::from("PID").alignment(Alignment::Right)),
+        Cell::from("STATE"),
+        Cell::from(Text::from("ADDRESS").alignment(Alignment::Right)),
+        Cell::from("PORT"),
+        Cell::from("PROCESS"),
+    ])
+    .style(header_style)
+    .height(1);
     let rows: Vec<Row> = app
         .items
         .iter()
@@ -73,12 +80,12 @@ fn render(frame: &mut Frame, app: &App) {
                 .unwrap_or(&item.local_address);
 
             Row::new(vec![
-                item.proto.to_string(),
-                item.pid.to_string(),
-                state.to_string(),
-                address.to_string(),
-                port,
-                item.proc_name.to_string(),
+                Cell::from(item.proto.to_string()),
+                Cell::from(Text::from(item.pid.to_string()).alignment(Alignment::Right)),
+                Cell::from(state.to_string()),
+                Cell::from(Text::from(address.to_string()).alignment(Alignment::Right)),
+                Cell::from(port),
+                Cell::from(item.proc_name.to_string()),
             ])
         })
         .collect();
