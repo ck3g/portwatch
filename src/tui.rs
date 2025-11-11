@@ -90,6 +90,8 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
+    let title_bottom = format!(" {} processes | q: quit | ↑↓: navigate ", app.items.len());
+
     let table = Table::new(
         rows,
         vec![
@@ -104,8 +106,8 @@ fn render(frame: &mut Frame, app: &App) {
     .header(header)
     .block(
         Block::default()
-            .title_top(Line::from("PortWatch").centered())
-            .title_bottom(Line::from("Press 'q' to quit").centered())
+            .title_top(Line::from(" PortWatch ").centered())
+            .title_bottom(Line::from(title_bottom).centered())
             .borders(Borders::ALL),
     );
 
