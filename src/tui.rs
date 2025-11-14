@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Text},
-    widgets::{Block, Borders, Cell, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
 };
 use std::time::{Duration, Instant};
 
@@ -28,12 +28,14 @@ const AVAILABLE_SIGNALS: [(Signal, &str, &str); 2] = [
 enum Mode {
     Normal,
     SignalSelect { signal_index: usize },
+    Filter,
 }
 
 struct App {
     items: Vec<PortProc>,
     selected: usize,
     mode: Mode,
+    filter: String,
 }
 
 impl App {
@@ -42,15 +44,17 @@ impl App {
             items,
             selected: 0,
             mode: Mode::Normal,
+            filter: String::new(),
         }
     }
 
     fn next(&mut self) {
-        if self.items.is_empty() {
+        let filtered = self.filtered_items();
+        if filtered.is_empty() {
             return;
         }
 
-        self.selected = if self.selected == self.items.len() - 1 {
+        self.selected = if self.selected == filtered.len() - 1 {
             0
         } else {
             self.selected + 1
@@ -58,12 +62,13 @@ impl App {
     }
 
     fn previous(&mut self) {
-        if self.items.is_empty() {
+        let filtered = self.filtered_items();
+        if filtered.is_empty() {
             return;
         }
 
         self.selected = if self.selected == 0 {
-            self.items.len() - 1
+            filtered.len() - 1
         } else {
             self.selected - 1
         }
@@ -72,13 +77,42 @@ impl App {
     fn refresh_items(&mut self, new_items: Vec<PortProc>) {
         self.items = new_items;
 
-        if !self.items.is_empty() && self.selected >= self.items.len() {
+        // Clamp to filtered list if filter is active
+        let filtered_len = self.filtered_items().len();
+        if !filtered_len == 0 && self.selected >= filtered_len {
+            self.selected = filtered_len - 1;
+        } else if !self.items.is_empty() && self.selected >= self.items.len() {
             self.selected = self.items.len() - 1;
         }
     }
+
+    fn filtered_items(&self) -> Vec<&PortProc> {
+        if self.filter.is_empty() {
+            return self.items.iter().collect();
+        }
+        let filter_text = self.filter.to_lowercase();
+
+        // Filter items that match the search text
+        self.items
+            .iter()
+            .filter(|item| {
+                // Match against process name
+                item.proc_name.to_lowercase().contains(&filter_text)
+                    // Match against PID
+                    || item.pid.to_string().contains(&filter_text)
+                    // Match against port
+                    || extract_port(&item.local_address)
+                        .map(|p| p.to_string().contains(&filter_text))
+                        .unwrap_or(false)
+                    // Match against address
+                    || item.local_address.to_lowercase().contains(&filter_text)
+                    // Match against protocol
+                    || item.proto.to_string().to_lowercase().contains(&filter_text)
+            })
+            .collect()
+    }
 }
 
-#[allow(dead_code)]
 fn send_signal(pid: u32, signal: Signal) -> Result<()> {
     kill(Pid::from_raw(pid as i32), signal)?;
     Ok(())
@@ -113,6 +147,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                     KeyCode::Char('s') => {
                         app.mode = Mode::SignalSelect { signal_index: 0 };
                     }
+                    KeyCode::Char('/') => {
+                        app.mode = Mode::Filter;
+                    }
                     KeyCode::Up | KeyCode::Char('k') => app.previous(),
                     KeyCode::Down | KeyCode::Char('j') => app.next(),
                     _ => {}
@@ -133,25 +170,45 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         }
                     }
                     KeyCode::Enter => {
-                        if let Mode::SignalSelect { signal_index } = app.mode
-                            && !app.items.is_empty()
-                        {
-                            let selected_item = &app.items[app.selected];
-                            let (signal, _, _) = AVAILABLE_SIGNALS[signal_index];
+                        if let Mode::SignalSelect { signal_index } = app.mode {
+                            let filtered = app.filtered_items();
+                            if !filtered.is_empty() {
+                                let selected_item = filtered[app.selected];
+                                let (signal, _, _) = AVAILABLE_SIGNALS[signal_index];
 
-                            if let Err(e) = send_signal(selected_item.pid, signal) {
-                                eprintln!("Failed to send signal: {}", e);
-                            }
+                                if let Err(e) = send_signal(selected_item.pid, signal) {
+                                    eprintln!("Failed to send signal: {}", e);
+                                }
 
-                            // Refresh immediately to show the killed process is gone
-                            if let Ok(output) = fetch_ss_output() {
-                                let mut new_items = scan_ports(output);
-                                new_items.sort_by_key(|p| extract_port(&p.local_address));
-                                app.refresh_items(new_items);
+                                // Refresh immediately to show the killed process is gone
+                                if let Ok(output) = fetch_ss_output() {
+                                    let mut new_items = scan_ports(output);
+                                    new_items.sort_by_key(|p| extract_port(&p.local_address));
+                                    app.refresh_items(new_items);
+                                }
                             }
                         }
 
                         app.mode = Mode::Normal;
+                    }
+                    _ => {}
+                },
+                Mode::Filter => match key.code {
+                    KeyCode::Esc => {
+                        app.filter.clear();
+                        app.selected = 0;
+                        app.mode = Mode::Normal;
+                    }
+                    KeyCode::Enter => {
+                        app.mode = Mode::Normal;
+                    }
+                    KeyCode::Backspace => {
+                        app.filter.pop();
+                        app.selected = 0;
+                    }
+                    KeyCode::Char(c) => {
+                        app.filter.push(c);
+                        app.selected = 0;
                     }
                     _ => {}
                 },
@@ -171,6 +228,10 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 }
 
 fn render(frame: &mut Frame, app: &App) {
+    let filtered = app.filtered_items();
+    let total_count = app.items.len();
+    let filtered_count = filtered.len();
+
     let header_style = Style::default().add_modifier(Modifier::REVERSED);
     let header = Row::new(vec![
         Cell::from("PROTO"),
@@ -182,8 +243,7 @@ fn render(frame: &mut Frame, app: &App) {
     ])
     .style(header_style)
     .height(1);
-    let rows: Vec<Row> = app
-        .items
+    let rows: Vec<Row> = filtered
         .iter()
         .map(|item| {
             let port = extract_port(&item.local_address).map_or("?".to_string(), |p| p.to_string());
@@ -205,9 +265,15 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
+    let total_title = if filtered_count < total_count {
+        format!("Showing {} of {} processes", filtered_count, total_count)
+    } else {
+        format!("{} processes", total_count)
+    };
+
     let title_bottom = format!(
-        " {} processes | ↑↓ or j/k: navigate | q: quit ",
-        app.items.len()
+        " {} | ↑↓ or j/k: navigate | s: signal | /: filter | q: quit ",
+        total_title
     );
 
     let table = Table::new(
@@ -238,14 +304,19 @@ fn render(frame: &mut Frame, app: &App) {
     if let Mode::SignalSelect { signal_index } = app.mode {
         render_signal_modal(frame, app, signal_index);
     }
+
+    if let Mode::Filter = &app.mode {
+        render_filter_input(frame, &app.filter);
+    }
 }
 
 fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
-    if app.items.is_empty() {
+    let filtered = app.filtered_items();
+    if filtered.is_empty() {
         return;
     }
 
-    let process = &app.items[app.selected];
+    let process = filtered[app.selected];
 
     let area = centered_rect(50, 40, frame.area());
 
@@ -294,6 +365,26 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn render_filter_input(frame: &mut Frame, input: &str) {
+    // Split screen to reserve bottom line for filter input
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(3)])
+        .split(frame.area());
+
+    let hint = " ⏎ Apply | Esc Cancel ";
+
+    let block = Block::default()
+        .title_top(Line::from(" Filter ").left_aligned())
+        .title_bottom(Line::from(hint).centered())
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Yellow));
+
+    let paragraph = Paragraph::new(format!("{}{}", HIGHLIGHT_SYMBOL, input)).block(block);
+
+    frame.render_widget(paragraph, chunks[1]);
 }
 
 #[cfg(test)]
