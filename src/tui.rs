@@ -79,7 +79,7 @@ impl App {
 
         // Clamp to filtered list if filter is active
         let filtered_len = self.filtered_items().len();
-        if !filtered_len == 0 && self.selected >= filtered_len {
+        if filtered_len != 0 && self.selected >= filtered_len {
             self.selected = filtered_len - 1;
         } else if !self.items.is_empty() && self.selected >= self.items.len() {
             self.selected = self.items.len() - 1;
@@ -149,6 +149,12 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                     }
                     KeyCode::Char('/') => {
                         app.mode = Mode::Filter;
+                    }
+                    KeyCode::Esc => {
+                        if !app.filter.is_empty() {
+                            app.filter.clear();
+                            app.selected = 0;
+                        }
                     }
                     KeyCode::Up | KeyCode::Char('k') => app.previous(),
                     KeyCode::Down | KeyCode::Char('j') => app.next(),
@@ -229,8 +235,50 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
 fn render(frame: &mut Frame, app: &App) {
     let filtered = app.filtered_items();
-    let total_count = app.items.len();
-    let filtered_count = filtered.len();
+
+    if filtered.is_empty() && !app.filter.is_empty() {
+        let message = format!(
+            "No processes match filter '{}'\nPress Esc to clear filter",
+            app.filter
+        );
+        render_message(frame, app, &message);
+    } else if app.items.is_empty() {
+        let message = "No processes listening on ports";
+        render_message(frame, app, message);
+    } else {
+        render_proc_table(frame, app);
+    }
+
+    if let Mode::SignalSelect { signal_index } = app.mode {
+        render_signal_modal(frame, app, signal_index);
+    }
+
+    if let Mode::Filter = &app.mode {
+        render_filter_input(frame, &app.filter);
+    }
+}
+
+fn render_message(frame: &mut Frame, app: &App, message: &str) {
+    let hint = hint(app);
+    let block = Block::default()
+        .title_top(Line::from(TITLE).centered())
+        .title_bottom(Line::from(hint).centered())
+        .borders(Borders::ALL)
+        .style(Style::default());
+
+    let binding = format!("\n\n{}", message);
+    let lines: Vec<Line> = binding
+        .split("\n")
+        .map(|line| Line::from(line).centered())
+        .collect();
+
+    let paragraph = Paragraph::new(lines).block(block);
+
+    frame.render_widget(paragraph, frame.area());
+}
+
+fn render_proc_table(frame: &mut Frame, app: &App) {
+    let filtered = app.filtered_items();
 
     let header_style = Style::default().add_modifier(Modifier::REVERSED);
     let header = Row::new(vec![
@@ -265,16 +313,7 @@ fn render(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let total_title = if filtered_count < total_count {
-        format!("Showing {} of {} processes", filtered_count, total_count)
-    } else {
-        format!("{} processes", total_count)
-    };
-
-    let title_bottom = format!(
-        " {} | ↑↓ or j/k: navigate | s: signal | /: filter | q: quit ",
-        total_title
-    );
+    let title_bottom = hint(app);
 
     let table = Table::new(
         rows,
@@ -300,14 +339,6 @@ fn render(frame: &mut Frame, app: &App) {
     let mut table_state = TableState::default().with_selected(Some(app.selected));
 
     frame.render_stateful_widget(table, frame.area(), &mut table_state);
-
-    if let Mode::SignalSelect { signal_index } = app.mode {
-        render_signal_modal(frame, app, signal_index);
-    }
-
-    if let Mode::Filter = &app.mode {
-        render_filter_input(frame, &app.filter);
-    }
 }
 
 fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
@@ -385,6 +416,25 @@ fn render_filter_input(frame: &mut Frame, input: &str) {
     let paragraph = Paragraph::new(format!("{}{}", HIGHLIGHT_SYMBOL, input)).block(block);
 
     frame.render_widget(paragraph, chunks[1]);
+}
+
+fn hint(app: &App) -> String {
+    let filtered = app.filtered_items();
+    let total_count = app.items.len();
+    let filtered_count = filtered.len();
+
+    let total_title = if filtered_count < total_count {
+        format!("Showing {} of {} processes", filtered_count, total_count)
+    } else {
+        format!("{} processes", total_count)
+    };
+
+    let title_bottom = format!(
+        " {} | ↑↓ or j/k: navigate | s: signal | /: filter | q: quit ",
+        total_title
+    );
+
+    title_bottom
 }
 
 #[cfg(test)]
