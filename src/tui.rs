@@ -16,6 +16,7 @@ use ratatui::{
 use std::time::{Duration, Instant};
 
 const REFRESH_INTERVAL_SEC: u64 = 5;
+const STATUS_MESSAGE_TIMEOUT_SEC: u64 = 3;
 const POLL_TIMEOUT_MS: u64 = 100;
 const HIGHLIGHT_BG_COLOR: Color = Color::Indexed(236);
 const HIGHLIGHT_SYMBOL: &str = "→ ";
@@ -36,6 +37,7 @@ struct App {
     selected: usize,
     mode: Mode,
     filter: String,
+    status_message: Option<(String, Instant)>,
 }
 
 impl App {
@@ -45,6 +47,7 @@ impl App {
             selected: 0,
             mode: Mode::Normal,
             filter: String::new(),
+            status_message: None,
         }
     }
 
@@ -111,6 +114,18 @@ impl App {
             })
             .collect()
     }
+
+    fn set_status(&mut self, message: String) {
+        self.status_message = Some((message, Instant::now()));
+    }
+
+    fn clear_expired_status(&mut self) {
+        if let Some((_, timestamp)) = &self.status_message
+            && timestamp.elapsed() > Duration::from_secs(STATUS_MESSAGE_TIMEOUT_SEC)
+        {
+            self.status_message = None;
+        }
+    }
 }
 
 fn send_signal(pid: u32, signal: Signal) -> Result<()> {
@@ -136,6 +151,8 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
 
     loop {
         terminal.draw(|frame| render(frame, &app))?;
+
+        app.clear_expired_status();
 
         // Poll with timeout (non-blocking)
         if event::poll(Duration::from_millis(POLL_TIMEOUT_MS))?
@@ -180,10 +197,21 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                             let filtered = app.filtered_items();
                             if !filtered.is_empty() {
                                 let selected_item = filtered[app.selected];
-                                let (signal, _, _) = AVAILABLE_SIGNALS[signal_index];
+                                let (signal, signal_name, _) = AVAILABLE_SIGNALS[signal_index];
 
-                                if let Err(e) = send_signal(selected_item.pid, signal) {
-                                    eprintln!("Failed to send signal: {}", e);
+                                match send_signal(selected_item.pid, signal) {
+                                    Ok(_) => {
+                                        app.set_status(format!(
+                                            "Sent {} to PID {} ({})",
+                                            signal_name, selected_item.pid, selected_item.proc_name
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        app.set_status(format!(
+                                            "Failed to send signal to PID {}: {}",
+                                            selected_item.pid, e
+                                        ));
+                                    }
                                 }
 
                                 // Refresh immediately to show the killed process is gone
@@ -419,6 +447,10 @@ fn render_filter_input(frame: &mut Frame, input: &str) {
 }
 
 fn hint(app: &App) -> String {
+    if let Some((message, _)) = &app.status_message {
+        return format!(" {} ", message);
+    }
+
     let filtered = app.filtered_items();
     let total_count = app.items.len();
     let filtered_count = filtered.len();
