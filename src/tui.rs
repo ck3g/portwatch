@@ -25,11 +25,28 @@ const AVAILABLE_SIGNALS: [(Signal, &str, &str); 2] = [
     (Signal::SIGTERM, "SIGTERM (15)", "Graceful shutdown"),
     (Signal::SIGKILL, "SIGKILL (9)", "Force kill"),
 ];
+const HELP_TEXT: &str = "
+Navigation:
+    ↑/k - Move selection up
+    ↓/j - Move selection down
+
+Actions:
+    s - Send signal to selected process
+    q - Quit the application
+
+Search & Filter:
+    / - Start filtering (type to search)
+    Esc - Clear active filter
+
+Help:
+    ? - Show/Hide this help
+";
 
 enum Mode {
     Normal,
     SignalSelect { signal_index: usize },
     Filter,
+    Help { scroll: u16 },
 }
 
 struct App {
@@ -161,6 +178,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
             match app.mode {
                 Mode::Normal => match key.code {
                     KeyCode::Char('q') => break,
+                    KeyCode::Char('?') => {
+                        app.mode = Mode::Help { scroll: 0 };
+                    }
                     KeyCode::Char('s') => {
                         app.mode = Mode::SignalSelect { signal_index: 0 };
                     }
@@ -246,6 +266,31 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                     }
                     _ => {}
                 },
+                Mode::Help { .. } => match key.code {
+                    KeyCode::Esc => {
+                        app.mode = Mode::Normal;
+                    }
+                    KeyCode::Char('?') => {
+                        app.mode = Mode::Normal;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Mode::Help { scroll } = &mut app.mode
+                            && *scroll > 0
+                        {
+                            *scroll -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Mode::Help { scroll } = &mut app.mode {
+                            let max_scroll = HELP_TEXT.lines().count().saturating_sub(5) as u16;
+
+                            if *scroll < max_scroll {
+                                *scroll += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                },
             }
         }
 
@@ -283,6 +328,10 @@ fn render(frame: &mut Frame, app: &App) {
 
     if let Mode::Filter = &app.mode {
         render_filter_input(frame, &app.filter);
+    }
+
+    if let Mode::Help { scroll } = app.mode {
+        render_help_modal(frame, scroll);
     }
 }
 
@@ -404,6 +453,24 @@ fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
         .block(block);
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_help_modal(frame: &mut Frame, scroll_offset: u16) {
+    let area = centered_rect(50, 60, frame.area());
+    let title = " Help ".to_string();
+    let hint = " ↑↓ or j/k: Scroll | Esc or ?: Cancel ".to_string();
+
+    let block = Block::default()
+        .title_top(Line::from(title).centered())
+        .title_bottom(Line::from(hint).centered())
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black));
+
+    let paragraph = Paragraph::new(HELP_TEXT)
+        .block(block)
+        .scroll((scroll_offset, 0));
+
+    frame.render_widget(paragraph, area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
