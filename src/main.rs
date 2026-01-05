@@ -10,7 +10,13 @@ use std::thread;
 use std::time::Duration;
 
 use display::{clear_screen, enter_alternate_screen, exit_alternate_screen, render_table};
-use parser::{extract_port, fetch_ss_output, scan_ports};
+use parser::{check_ss_available, extract_port, fetch_ss_output, scan_ports};
+
+const COMMAND_NOT_FOUND_ERROR: &str = "Error: ss command not found
+
+portwatch requires 'ss' command to scan network ports.
+
+Install the command for your system and try again.";
 
 struct CleanupGuard;
 
@@ -41,6 +47,11 @@ struct Args {
 }
 
 fn main() {
+    if check_ss_available().is_err() {
+        println!("{}", COMMAND_NOT_FOUND_ERROR);
+        std::process::exit(1);
+    }
+
     let cli = Args::parse();
     if cli.once {
         handle_once();

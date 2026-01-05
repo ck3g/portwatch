@@ -10,3 +10,4 @@ crossterm = "0.29.0"
 ctrlc = "3.5.1"
 nix = { version = "0.30.1", features = ["signal"] }
 ratatui = "0.29.0"
+which = "8.0.0"

@@ -1,6 +1,12 @@
 use crate::types::{PortProc, Proto};
 use anyhow::Context;
 use std::process::Command;
+use which::which;
+
+pub fn check_ss_available() -> anyhow::Result<()> {
+    which("ss").context("ss command not found")?;
+    Ok(())
+}
 
 pub fn fetch_ss_output() -> anyhow::Result<String> {
     let output = Command::new("ss")
