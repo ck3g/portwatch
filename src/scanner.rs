@@ -84,12 +84,12 @@ impl SsScanner {
 
         Some((proc_name.to_string(), pid))
     }
+}
 
-    pub fn extract_port(&self, local_address: &str) -> Option<u16> {
-        local_address
-            .rsplit_once(":")
-            .and_then(|(_, port_str)| port_str.parse::<u16>().ok())
-    }
+pub fn extract_port(local_address: &str) -> Option<u16> {
+    local_address
+        .rsplit_once(":")
+        .and_then(|(_, port_str)| port_str.parse::<u16>().ok())
 }
 
 // impl PortScanner for SsScanner {
@@ -175,11 +175,10 @@ tcp         LISTEN       0            1024                               [::1]:3
 
     #[test]
     fn extract_port_from_local_address() {
-        let scanner = SsScanner;
-        assert_eq!(scanner.extract_port(""), None);
-        assert_eq!(scanner.extract_port("224.0.0.251:5353"), Some(5353));
-        assert_eq!(scanner.extract_port("[::1]:3000"), Some(3000));
-        assert_eq!(scanner.extract_port("224.0.0.251:abcd"), None);
-        assert_eq!(scanner.extract_port("invalid-address"), None);
+        assert_eq!(extract_port(""), None);
+        assert_eq!(extract_port("224.0.0.251:5353"), Some(5353));
+        assert_eq!(extract_port("[::1]:3000"), Some(3000));
+        assert_eq!(extract_port("224.0.0.251:abcd"), None);
+        assert_eq!(extract_port("invalid-address"), None);
     }
 }

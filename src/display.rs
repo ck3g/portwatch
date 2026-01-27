@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::scanner::SsScanner;
+use crate::scanner::extract_port;
 use crate::types::PortProc;
 
 pub fn clear_screen() {
@@ -49,10 +49,7 @@ pub fn render_table(items: &[PortProc]) {
 
     for item in items {
         let state_str = item.state.as_deref().unwrap_or("");
-        let scanner = SsScanner;
-        let port_str = scanner
-            .extract_port(&item.local_address)
-            .map_or("?".to_string(), |p| p.to_string());
+        let port_str = extract_port(&item.local_address).map_or("?".to_string(), |p| p.to_string());
         let local_address = item
             .local_address
             .rsplit_once(":")

@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use display::{clear_screen, enter_alternate_screen, exit_alternate_screen, render_table};
-use scanner::SsScanner;
+use scanner::{extract_port, SsScanner};
 
 const COMMAND_NOT_FOUND_ERROR: &str = "Error: ss command not found
 
@@ -69,7 +69,7 @@ fn handle_once() {
     match scanner.fetch_output() {
         Ok(stdout) => {
             let mut pp = scanner.scan_ports(stdout);
-            pp.sort_by_key(|p| scanner.extract_port(&p.local_address));
+            pp.sort_by_key(|p| extract_port(&p.local_address));
 
             render_table(&pp);
         }
