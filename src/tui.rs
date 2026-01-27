@@ -1,7 +1,4 @@
-use crate::{
-    parser::{extract_port, fetch_ss_output, scan_ports},
-    types::PortProc,
-};
+use crate::{scanner::SsScanner, types::PortProc};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use nix::sys::signal::{Signal, kill};
@@ -111,6 +108,7 @@ impl App {
             return self.items.iter().collect();
         }
         let filter_text = self.filter.to_lowercase();
+        let scanner = SsScanner;
 
         // Filter items that match the search text
         self.items
@@ -121,7 +119,7 @@ impl App {
                     // Match against PID
                     || item.pid.to_string().contains(&filter_text)
                     // Match against port
-                    || extract_port(&item.local_address)
+                    || scanner.extract_port(&item.local_address)
                         .map(|p| p.to_string().contains(&filter_text))
                         .unwrap_or(false)
                     // Match against address
@@ -158,9 +156,10 @@ pub fn run_tui() -> Result<()> {
 }
 
 fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
-    let output = fetch_ss_output()?;
-    let mut items = scan_ports(output);
-    items.sort_by_key(|p| extract_port(&p.local_address));
+    let scanner = SsScanner;
+    let output = scanner.fetch_output()?;
+    let mut items = scanner.scan_ports(output);
+    items.sort_by_key(|p| scanner.extract_port(&p.local_address));
 
     let mut app = App::new(items);
     let mut last_refresh = Instant::now();
@@ -235,9 +234,10 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 }
 
                                 // Refresh immediately to show the killed process is gone
-                                if let Ok(output) = fetch_ss_output() {
-                                    let mut new_items = scan_ports(output);
-                                    new_items.sort_by_key(|p| extract_port(&p.local_address));
+                                if let Ok(output) = scanner.fetch_output() {
+                                    let mut new_items = scanner.scan_ports(output);
+                                    new_items
+                                        .sort_by_key(|p| scanner.extract_port(&p.local_address));
                                     app.refresh_items(new_items);
                                 }
                             }
@@ -295,9 +295,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         }
 
         if last_refresh.elapsed() >= refresh_interval {
-            let output = fetch_ss_output()?;
-            let mut new_items = scan_ports(output);
-            new_items.sort_by_key(|p| extract_port(&p.local_address));
+            let output = scanner.fetch_output()?;
+            let mut new_items = scanner.scan_ports(output);
+            new_items.sort_by_key(|p| scanner.extract_port(&p.local_address));
             app.refresh_items(new_items);
             last_refresh = Instant::now();
         }
@@ -355,6 +355,7 @@ fn render_message(frame: &mut Frame, app: &App, message: &str) {
 }
 
 fn render_proc_table(frame: &mut Frame, app: &App) {
+    let scanner = SsScanner;
     let filtered = app.filtered_items();
 
     let header_style = Style::default().add_modifier(Modifier::REVERSED);
@@ -371,7 +372,9 @@ fn render_proc_table(frame: &mut Frame, app: &App) {
     let rows: Vec<Row> = filtered
         .iter()
         .map(|item| {
-            let port = extract_port(&item.local_address).map_or("?".to_string(), |p| p.to_string());
+            let port = scanner
+                .extract_port(&item.local_address)
+                .map_or("?".to_string(), |p| p.to_string());
             let state = item.state.as_deref().unwrap_or("");
             let address = item
                 .local_address

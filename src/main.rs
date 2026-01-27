@@ -1,5 +1,5 @@
 mod display;
-mod parser;
+mod scanner;
 mod tui;
 mod types;
 
@@ -10,7 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use display::{clear_screen, enter_alternate_screen, exit_alternate_screen, render_table};
-use parser::{check_ss_available, extract_port, fetch_ss_output, scan_ports};
+use scanner::SsScanner;
 
 const COMMAND_NOT_FOUND_ERROR: &str = "Error: ss command not found
 
@@ -47,7 +47,9 @@ struct Args {
 }
 
 fn main() {
-    if check_ss_available().is_err() {
+    let scanner = SsScanner;
+
+    if scanner.check_ss_available().is_err() {
         println!("{}", COMMAND_NOT_FOUND_ERROR);
         std::process::exit(1);
     }
@@ -63,10 +65,11 @@ fn main() {
 }
 
 fn handle_once() {
-    match fetch_ss_output() {
+    let scanner = SsScanner;
+    match scanner.fetch_output() {
         Ok(stdout) => {
-            let mut pp = scan_ports(stdout);
-            pp.sort_by_key(|p| extract_port(&p.local_address));
+            let mut pp = scanner.scan_ports(stdout);
+            pp.sort_by_key(|p| scanner.extract_port(&p.local_address));
 
             render_table(&pp);
         }
