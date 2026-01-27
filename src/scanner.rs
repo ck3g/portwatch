@@ -15,7 +15,7 @@ impl SsScanner {
         Ok(())
     }
 
-    pub fn fetch_output(&self) -> Result<String> {
+    fn fetch_output(&self) -> Result<String> {
         let output = Command::new("ss")
             .args(["-tulpn"])
             .output()
@@ -31,7 +31,7 @@ impl SsScanner {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    pub fn scan_ports(&self, output: String) -> Vec<PortProc> {
+    fn scan_ports(&self, output: String) -> Vec<PortProc> {
         let mut results: Vec<PortProc> = Vec::new();
 
         for line in output.lines() {
@@ -72,7 +72,7 @@ impl SsScanner {
         results
     }
 
-    pub fn parse_process_info(&self, proc_str: &str) -> Option<(String, u32)> {
+    fn parse_process_info(&self, proc_str: &str) -> Option<(String, u32)> {
         let name_start = proc_str.find("((\"")? + 3;
         let name_end = proc_str[name_start..].find("\",")?;
         let proc_name = &proc_str[name_start..name_start + name_end];
@@ -86,16 +86,24 @@ impl SsScanner {
     }
 }
 
+pub fn create_scanner() -> Result<Box<dyn PortScanner>> {
+    Ok(Box::new(SsScanner))
+}
+
 pub fn extract_port(local_address: &str) -> Option<u16> {
     local_address
         .rsplit_once(":")
         .and_then(|(_, port_str)| port_str.parse::<u16>().ok())
 }
 
-// impl PortScanner for SsScanner {
-//     fn scan(&mut self) -> Result<Vec<PortProc>> {
-//     }
-// }
+impl PortScanner for SsScanner {
+    fn scan(&mut self) -> Result<Vec<PortProc>> {
+        let output = self.fetch_output()?;
+        let mut items = self.scan_ports(output);
+        items.sort_by_key(|p| extract_port(&p.local_address));
+        Ok(items)
+    }
+}
 
 #[cfg(test)]
 mod tests {

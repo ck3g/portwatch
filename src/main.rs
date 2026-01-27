@@ -8,9 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use which::which;
 
 use display::{clear_screen, enter_alternate_screen, exit_alternate_screen, render_table};
-use scanner::{extract_port, SsScanner};
+use scanner::create_scanner;
 
 const COMMAND_NOT_FOUND_ERROR: &str = "Error: ss command not found
 
@@ -47,9 +48,8 @@ struct Args {
 }
 
 fn main() {
-    let scanner = SsScanner;
-
-    if scanner.check_ss_available().is_err() {
+    // replacing check_ss_availability temporarily
+    if which("ss").is_err() {
         println!("{}", COMMAND_NOT_FOUND_ERROR);
         std::process::exit(1);
     }
@@ -65,15 +65,12 @@ fn main() {
 }
 
 fn handle_once() {
-    let scanner = SsScanner;
-    match scanner.fetch_output() {
-        Ok(stdout) => {
-            let mut pp = scanner.scan_ports(stdout);
-            pp.sort_by_key(|p| extract_port(&p.local_address));
-
-            render_table(&pp);
-        }
-        Err(err) => eprintln!("scan failed: {err}"),
+    match create_scanner() {
+        Ok(mut scanner) => match scanner.scan() {
+            Ok(items) => render_table(&items),
+            Err(e) => eprintln!("Scan failed: {}", e),
+        },
+        Err(e) => eprintln!("Failed to create scanner: {}", e),
     }
 }
 

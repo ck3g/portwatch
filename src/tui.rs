@@ -1,5 +1,5 @@
 use crate::{
-    scanner::{SsScanner, extract_port},
+    scanner::{create_scanner, extract_port},
     types::PortProc,
 };
 use anyhow::Result;
@@ -158,11 +158,8 @@ pub fn run_tui() -> Result<()> {
 }
 
 fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
-    let scanner = SsScanner;
-    let output = scanner.fetch_output()?;
-    let mut items = scanner.scan_ports(output);
-    items.sort_by_key(|p| extract_port(&p.local_address));
-
+    let mut scanner = create_scanner()?;
+    let items = scanner.scan()?;
     let mut app = App::new(items);
     let mut last_refresh = Instant::now();
     let refresh_interval = Duration::from_secs(REFRESH_INTERVAL_SEC);
@@ -236,11 +233,8 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                                 }
 
                                 // Refresh immediately to show the killed process is gone
-                                if let Ok(output) = scanner.fetch_output() {
-                                    let mut new_items = scanner.scan_ports(output);
-                                    new_items.sort_by_key(|p| extract_port(&p.local_address));
-                                    app.refresh_items(new_items);
-                                }
+                                let new_items = scanner.scan()?;
+                                app.refresh_items(new_items);
                             }
                         }
 
@@ -296,9 +290,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         }
 
         if last_refresh.elapsed() >= refresh_interval {
-            let output = scanner.fetch_output()?;
-            let mut new_items = scanner.scan_ports(output);
-            new_items.sort_by_key(|p| extract_port(&p.local_address));
+            let new_items = scanner.scan()?;
             app.refresh_items(new_items);
             last_refresh = Instant::now();
         }
