@@ -4,14 +4,14 @@ use crate::{
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
-use nix::sys::signal::{Signal, kill};
+use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Text},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
+    Frame,
 };
 use std::time::{Duration, Instant};
 
@@ -421,6 +421,8 @@ fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
 
     let area = centered_rect(50, 40, frame.area());
 
+    frame.render_widget(Clear, area);
+
     let rows: Vec<Row> = AVAILABLE_SIGNALS
         .iter()
         .map(|(_, name, desc)| Row::new(vec![Cell::from(format!("{} - {}", name, desc))]))
@@ -450,6 +452,9 @@ fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
 
 fn render_help_modal(frame: &mut Frame, scroll_offset: u16) {
     let area = centered_rect(50, 60, frame.area());
+
+    frame.render_widget(Clear, area);
+
     let title = " Help ".to_string();
     let hint = " ↑↓ or j/k: Scroll | Esc or ?: Cancel ".to_string();
 
