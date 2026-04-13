@@ -17,13 +17,21 @@ use std::time::{Duration, Instant};
 
 const REFRESH_INTERVAL_SEC: u64 = 5;
 const STATUS_MESSAGE_TIMEOUT_SEC: u64 = 3;
+const DEFAULT_SIGNAL_INDEX: usize = 4; // SIGTERM
 const POLL_TIMEOUT_MS: u64 = 100;
 const HIGHLIGHT_BG_COLOR: Color = Color::Indexed(236);
 const HIGHLIGHT_SYMBOL: &str = "→ ";
 const TITLE: &str = " PortWatch ";
-const AVAILABLE_SIGNALS: [(Signal, &str, &str); 2] = [
+const AVAILABLE_SIGNALS: [(Signal, &str, &str); 9] = [
+    (Signal::SIGHUP, "SIGHUP  (1) ", "Hangup / reload config"),
+    (Signal::SIGINT, "SIGINT  (2) ", "Interrupt (Ctrl+C)"),
+    (Signal::SIGQUIT, "SIGQUIT (3) ", "Quit with core dump"),
+    (Signal::SIGKILL, "SIGKILL (9) ", "Force kill"),
     (Signal::SIGTERM, "SIGTERM (15)", "Graceful shutdown"),
-    (Signal::SIGKILL, "SIGKILL (9)", "Force kill"),
+    (Signal::SIGSTOP, "SIGSTOP (17)", "Pause process"),
+    (Signal::SIGCONT, "SIGCONT (19)", "Resume process"),
+    (Signal::SIGUSR1, "SIGUSR1 (30)", "User-defined signal 1"),
+    (Signal::SIGUSR2, "SIGUSR2 (31)", "User-defined signal 2"),
 ];
 const HELP_TEXT: &str = "
 Navigation:
@@ -91,6 +99,22 @@ impl App {
             filtered.len() - 1
         } else {
             self.selected - 1
+        }
+    }
+
+    fn next_signal(&mut self) {
+        if let Mode::SignalSelect { signal_index } = &mut self.mode {
+            *signal_index = (*signal_index + 1) % AVAILABLE_SIGNALS.len();
+        }
+    }
+
+    fn previous_signal(&mut self) {
+        if let Mode::SignalSelect { signal_index } = &mut self.mode {
+            if *signal_index == 0 {
+                *signal_index = AVAILABLE_SIGNALS.len() - 1;
+            } else {
+                *signal_index -= 1;
+            }
         }
     }
 
@@ -180,7 +204,9 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         app.mode = Mode::Help { scroll: 0 };
                     }
                     KeyCode::Char('s') => {
-                        app.mode = Mode::SignalSelect { signal_index: 0 };
+                        app.mode = Mode::SignalSelect {
+                            signal_index: DEFAULT_SIGNAL_INDEX,
+                        };
                     }
                     KeyCode::Char('/') => {
                         app.mode = Mode::Filter;
@@ -200,16 +226,8 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         app.mode = Mode::Normal;
                     }
 
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if let Mode::SignalSelect { signal_index } = &mut app.mode {
-                            *signal_index = if *signal_index == 0 { 1 } else { 0 };
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if let Mode::SignalSelect { signal_index } = &mut app.mode {
-                            *signal_index = if *signal_index == 0 { 1 } else { 0 };
-                        }
-                    }
+                    KeyCode::Up | KeyCode::Char('k') => app.previous_signal(),
+                    KeyCode::Down | KeyCode::Char('j') => app.next_signal(),
                     KeyCode::Enter => {
                         if let Mode::SignalSelect { signal_index } = app.mode {
                             let filtered = app.filtered_items();
@@ -601,5 +619,87 @@ mod tests {
         app.refresh_items(new_items);
         assert_eq!(app.items.len(), 2);
         assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn test_default_signal_index_is_sigterm() {
+        let (signal, _, _) = AVAILABLE_SIGNALS[DEFAULT_SIGNAL_INDEX];
+        assert_eq!(signal, Signal::SIGTERM);
+    }
+
+    #[test]
+    fn test_signals_sorted_by_number() {
+        let numbers: Vec<i32> = AVAILABLE_SIGNALS
+            .iter()
+            .map(|(sig, _, _)| *sig as i32)
+            .collect();
+        for i in 1..numbers.len() {
+            assert!(
+                numbers[i - 1] < numbers[i],
+                "Signal {} (={}) should come before {} (={})",
+                AVAILABLE_SIGNALS[i - 1].1,
+                numbers[i - 1],
+                AVAILABLE_SIGNALS[i].1,
+                numbers[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_next_signal() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.mode = Mode::SignalSelect { signal_index: 0 };
+        app.next_signal();
+        if let Mode::SignalSelect { signal_index } = app.mode {
+            assert_eq!(signal_index, 1);
+        } else {
+            panic!("Expected SignalSelect mode");
+        }
+    }
+
+    #[test]
+    fn test_next_signal_wraps_around() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.mode = Mode::SignalSelect {
+            signal_index: AVAILABLE_SIGNALS.len() - 1,
+        };
+        app.next_signal();
+        if let Mode::SignalSelect { signal_index } = app.mode {
+            assert_eq!(signal_index, 0);
+        } else {
+            panic!("Expected SignalSelect mode");
+        }
+    }
+
+    #[test]
+    fn test_previous_signal() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.mode = Mode::SignalSelect { signal_index: 1 };
+        app.previous_signal();
+        if let Mode::SignalSelect { signal_index } = app.mode {
+            assert_eq!(signal_index, 0);
+        } else {
+            panic!("Expected SignalSelect mode");
+        }
+    }
+
+    #[test]
+    fn test_previous_signal_wraps_around() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.mode = Mode::SignalSelect { signal_index: 0 };
+        app.previous_signal();
+        if let Mode::SignalSelect { signal_index } = app.mode {
+            assert_eq!(signal_index, AVAILABLE_SIGNALS.len() - 1);
+        } else {
+            panic!("Expected SignalSelect mode");
+        }
+    }
+
+    #[test]
+    fn test_next_signal_noop_in_normal_mode() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.mode = Mode::Normal;
+        app.next_signal();
+        assert!(matches!(app.mode, Mode::Normal));
     }
 }

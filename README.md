@@ -6,7 +6,7 @@ A fast, interactive TUI for monitoring which processes are listening on which po
 
 - **Interactive TUI** with real-time updates
 - **Live filtering** by process name, PID, port, or protocol
-- **Kill processes** with SIGTERM/SIGKILL from the UI
+- **Send signals** to processes (SIGTERM, SIGKILL, SIGHUP, SIGINT, and more)
 - **Table view** with sorting and navigation
 - **Auto-refresh** or manual update modes
 - **Linux & macOS** support with automatic backend detection
@@ -39,7 +39,7 @@ portwatch
 **Keybindings:**
 - `↑/↓` or `j/k` - Navigate
 - `/` - Filter (search by process, port, etc.)
-- `s` - Send signal (SIGTERM/SIGKILL) to selected process
+- `s` - Send signal to selected process
 - `?` - Show help
 - `Esc` - Clear filter / Cancel action
 - `q` - Quit
@@ -55,6 +55,27 @@ portwatch --once
 ```bash
 portwatch --interval 5
 ```
+
+## Supported Signals
+
+PortWatch includes a curated set of signals useful for managing network services
+and daemons, rather than the full list of POSIX signals:
+
+| Signal | Description |
+|--------|-------------|
+| SIGTERM | Graceful shutdown (default) |
+| SIGKILL | Force kill (cannot be caught) |
+| SIGHUP | Hangup — many daemons reload configuration (e.g., nginx, PostgreSQL) |
+| SIGINT | Interrupt, equivalent to Ctrl+C |
+| SIGQUIT | Quit with core dump, useful for debugging hung services |
+| SIGSTOP | Pause (freeze) a process |
+| SIGCONT | Resume a paused process |
+| SIGUSR1 | User-defined — used by many servers for app-specific actions (e.g., log reopening) |
+| SIGUSR2 | User-defined — used by many servers for app-specific actions (e.g., graceful restart) |
+
+Signals like SIGILL, SIGSEGV, SIGBUS, and SIGFPE are intentionally excluded.
+These are hardware/OS fault signals not meant for manual process management — sending
+them to a process simulates a crash rather than controlling it.
 
 ## Requirements
 
