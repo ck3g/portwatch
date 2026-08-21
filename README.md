@@ -41,11 +41,14 @@ portwatch
 - `↑/↓` or `j/k` - Navigate
 - `/` - Filter (search by process, port, etc.)
 - `s` - Send signal to selected process
+- `Enter` - Review the selected signal
+- `y` - Confirm sending the signal
+- `n` - Cancel signal confirmation
 - `?` - Show help
 - `Esc` - Clear filter / Cancel action
 - `q` - Quit
 
-> **Safety:** Sending SIGTERM or SIGKILL terminates the selected process and may require elevated permissions. Review the selected PID and process name before confirming.
+> **Safety:** Signals can terminate, suspend, resume, or reconfigure the selected process and may require elevated permissions. Review the signal, PID, and process name before confirming.
 
 ### CLI Modes
 

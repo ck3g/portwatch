@@ -4,34 +4,33 @@ use crate::{
 };
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
-use nix::sys::signal::{kill, Signal};
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Text},
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
-    Frame,
 };
 use std::time::{Duration, Instant};
 
 const REFRESH_INTERVAL_SEC: u64 = 5;
 const STATUS_MESSAGE_TIMEOUT_SEC: u64 = 3;
-const DEFAULT_SIGNAL_INDEX: usize = 4; // SIGTERM
 const POLL_TIMEOUT_MS: u64 = 100;
 const HIGHLIGHT_BG_COLOR: Color = Color::Indexed(236);
 const HIGHLIGHT_SYMBOL: &str = "→ ";
 const TITLE: &str = " PortWatch ";
-const AVAILABLE_SIGNALS: [(Signal, &str, &str); 9] = [
-    (Signal::SIGHUP, "SIGHUP  (1) ", "Hangup / reload config"),
-    (Signal::SIGINT, "SIGINT  (2) ", "Interrupt (Ctrl+C)"),
-    (Signal::SIGQUIT, "SIGQUIT (3) ", "Quit with core dump"),
-    (Signal::SIGKILL, "SIGKILL (9) ", "Force kill"),
-    (Signal::SIGTERM, "SIGTERM (15)", "Graceful shutdown"),
-    (Signal::SIGSTOP, "SIGSTOP (17)", "Pause process"),
-    (Signal::SIGCONT, "SIGCONT (19)", "Resume process"),
-    (Signal::SIGUSR1, "SIGUSR1 (30)", "User-defined signal 1"),
-    (Signal::SIGUSR2, "SIGUSR2 (31)", "User-defined signal 2"),
+const SIGNAL_OPTIONS: [SignalOption; 9] = [
+    SignalOption::new(Signal::SIGHUP, "SIGHUP", "Hangup / reload config"),
+    SignalOption::new(Signal::SIGINT, "SIGINT", "Interrupt (Ctrl+C)"),
+    SignalOption::new(Signal::SIGQUIT, "SIGQUIT", "Quit with core dump"),
+    SignalOption::new(Signal::SIGKILL, "SIGKILL", "Force kill"),
+    SignalOption::new(Signal::SIGTERM, "SIGTERM", "Graceful shutdown"),
+    SignalOption::new(Signal::SIGSTOP, "SIGSTOP", "Pause process"),
+    SignalOption::new(Signal::SIGCONT, "SIGCONT", "Resume process"),
+    SignalOption::new(Signal::SIGUSR1, "SIGUSR1", "User-defined signal 1"),
+    SignalOption::new(Signal::SIGUSR2, "SIGUSR2", "User-defined signal 2"),
 ];
 const HELP_TEXT: &str = "
 Navigation:
@@ -50,9 +49,35 @@ Help:
     ? - Show/Hide this help
 ";
 
+#[derive(Clone, Copy)]
+struct SignalOption {
+    signal: Signal,
+    name: &'static str,
+    description: &'static str,
+}
+
+impl SignalOption {
+    const fn new(signal: Signal, name: &'static str, description: &'static str) -> Self {
+        Self {
+            signal,
+            name,
+            description,
+        }
+    }
+}
+
+struct PendingSignal {
+    signal: Signal,
+    signal_name: &'static str,
+    pid: u32,
+    proc_name: String,
+}
+
+#[derive(Clone, Copy)]
 enum Mode {
     Normal,
     SignalSelect { signal_index: usize },
+    SignalConfirm,
     Filter,
     Help { scroll: u16 },
 }
@@ -63,6 +88,18 @@ struct App {
     mode: Mode,
     filter: String,
     status_message: Option<(String, Instant)>,
+    signals: Vec<SignalOption>,
+    pending_signal: Option<PendingSignal>,
+}
+
+fn available_signals() -> Vec<SignalOption> {
+    let mut signals = SIGNAL_OPTIONS.to_vec();
+    signals.sort_by_key(|option| option.signal as i32);
+    signals
+}
+
+fn signal_label(option: &SignalOption) -> String {
+    format!("{:<7} ({})", option.name, option.signal as i32)
 }
 
 impl App {
@@ -73,6 +110,70 @@ impl App {
             mode: Mode::Normal,
             filter: String::new(),
             status_message: None,
+            signals: available_signals(),
+            pending_signal: None,
+        }
+    }
+
+    fn open_signal_selection(&mut self) {
+        let signal_index = self
+            .signals
+            .iter()
+            .position(|option| option.signal == Signal::SIGTERM)
+            .unwrap_or(0);
+        self.mode = Mode::SignalSelect { signal_index };
+    }
+
+    fn request_signal_confirmation(&mut self) {
+        let Mode::SignalSelect { signal_index } = self.mode else {
+            return;
+        };
+        let Some(option) = self.signals.get(signal_index).copied() else {
+            return;
+        };
+        let Some(process) = self.filtered_items().get(self.selected).copied() else {
+            return;
+        };
+
+        self.pending_signal = Some(PendingSignal {
+            signal: option.signal,
+            signal_name: option.name,
+            pid: process.pid,
+            proc_name: process.proc_name.clone(),
+        });
+        self.mode = Mode::SignalConfirm;
+    }
+
+    fn cancel_signal_confirmation(&mut self) {
+        self.pending_signal = None;
+        self.mode = Mode::Normal;
+    }
+
+    fn handle_signal_selection_key(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Up | KeyCode::Char('k') => self.previous_signal(),
+            KeyCode::Down | KeyCode::Char('j') => self.next_signal(),
+            KeyCode::Enter => self.request_signal_confirmation(),
+            _ => {}
+        }
+    }
+
+    fn handle_signal_confirmation_key(&mut self, key: KeyCode) -> Option<PendingSignal> {
+        if !matches!(self.mode, Mode::SignalConfirm) {
+            return None;
+        }
+
+        match key {
+            KeyCode::Char('y') => {
+                self.mode = Mode::Normal;
+                self.pending_signal.take()
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.cancel_signal_confirmation();
+                None
+            }
+            _ => None,
         }
     }
 
@@ -104,14 +205,14 @@ impl App {
 
     fn next_signal(&mut self) {
         if let Mode::SignalSelect { signal_index } = &mut self.mode {
-            *signal_index = (*signal_index + 1) % AVAILABLE_SIGNALS.len();
+            *signal_index = (*signal_index + 1) % self.signals.len();
         }
     }
 
     fn previous_signal(&mut self) {
         if let Mode::SignalSelect { signal_index } = &mut self.mode {
             if *signal_index == 0 {
-                *signal_index = AVAILABLE_SIGNALS.len() - 1;
+                *signal_index = self.signals.len() - 1;
             } else {
                 *signal_index -= 1;
             }
@@ -204,9 +305,7 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                         app.mode = Mode::Help { scroll: 0 };
                     }
                     KeyCode::Char('s') => {
-                        app.mode = Mode::SignalSelect {
-                            signal_index: DEFAULT_SIGNAL_INDEX,
-                        };
+                        app.open_signal_selection();
                     }
                     KeyCode::Char('/') => {
                         app.mode = Mode::Filter;
@@ -221,45 +320,26 @@ fn run_app(terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
                     KeyCode::Down | KeyCode::Char('j') => app.next(),
                     _ => {}
                 },
-                Mode::SignalSelect { .. } => match key.code {
-                    KeyCode::Esc => {
-                        app.mode = Mode::Normal;
-                    }
-
-                    KeyCode::Up | KeyCode::Char('k') => app.previous_signal(),
-                    KeyCode::Down | KeyCode::Char('j') => app.next_signal(),
-                    KeyCode::Enter => {
-                        if let Mode::SignalSelect { signal_index } = app.mode {
-                            let filtered = app.filtered_items();
-                            if !filtered.is_empty() {
-                                let selected_item = filtered[app.selected];
-                                let (signal, signal_name, _) = AVAILABLE_SIGNALS[signal_index];
-
-                                match send_signal(selected_item.pid, signal) {
-                                    Ok(_) => {
-                                        app.set_status(format!(
-                                            "Sent {} to PID {} ({})",
-                                            signal_name, selected_item.pid, selected_item.proc_name
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        app.set_status(format!(
-                                            "Failed to send signal to PID {}: {}",
-                                            selected_item.pid, e
-                                        ));
-                                    }
-                                }
-
-                                // Refresh immediately to show the killed process is gone
-                                let new_items = scanner.scan()?;
-                                app.refresh_items(new_items);
-                            }
+                Mode::SignalSelect { .. } => app.handle_signal_selection_key(key.code),
+                Mode::SignalConfirm => {
+                    if let Some(pending) = app.handle_signal_confirmation_key(key.code) {
+                        let signal_name =
+                            format!("{} ({})", pending.signal_name, pending.signal as i32);
+                        match send_signal(pending.pid, pending.signal) {
+                            Ok(_) => app.set_status(format!(
+                                "Sent {} to PID {} ({})",
+                                signal_name, pending.pid, pending.proc_name
+                            )),
+                            Err(e) => app.set_status(format!(
+                                "Failed to send signal to PID {}: {}",
+                                pending.pid, e
+                            )),
                         }
 
-                        app.mode = Mode::Normal;
+                        let new_items = scanner.scan()?;
+                        app.refresh_items(new_items);
                     }
-                    _ => {}
-                },
+                }
                 Mode::Filter => match key.code {
                     KeyCode::Esc => {
                         app.filter.clear();
@@ -335,6 +415,10 @@ fn render(frame: &mut Frame, app: &App) {
 
     if let Mode::SignalSelect { signal_index } = app.mode {
         render_signal_modal(frame, app, signal_index);
+    }
+
+    if let Mode::SignalConfirm = app.mode {
+        render_signal_confirmation_modal(frame, app);
     }
 
     if let Mode::Filter = &app.mode {
@@ -441,16 +525,23 @@ fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
 
     frame.render_widget(Clear, area);
 
-    let rows: Vec<Row> = AVAILABLE_SIGNALS
+    let rows: Vec<Row> = app
+        .signals
         .iter()
-        .map(|(_, name, desc)| Row::new(vec![Cell::from(format!("{} - {}", name, desc))]))
+        .map(|option| {
+            Row::new(vec![Cell::from(format!(
+                "{} - {}",
+                signal_label(option),
+                option.description
+            ))])
+        })
         .collect();
 
     let title = format!(
         " Send signal to PID {} ({}) ",
         process.pid, process.proc_name
     );
-    let hint = " ↵: Send | Esc: Cancel | ↑↓ or j/k: Select ".to_string();
+    let hint = " ↵: Review | Esc: Cancel | ↑↓ or j/k: Select ".to_string();
 
     let block = Block::default()
         .title_top(Line::from(title).centered())
@@ -466,6 +557,30 @@ fn render_signal_modal(frame: &mut Frame, app: &App, selected_signal: usize) {
         .block(block);
 
     frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_signal_confirmation_modal(frame: &mut Frame, app: &App) {
+    let Some(pending) = &app.pending_signal else {
+        return;
+    };
+    let area = centered_rect(60, 25, frame.area());
+    frame.render_widget(Clear, area);
+
+    let signal_name = format!("{} ({})", pending.signal_name, pending.signal as i32);
+    let message = format!(
+        "Send {} to PID {} ({})?",
+        signal_name, pending.pid, pending.proc_name
+    );
+    let block = Block::default()
+        .title_top(Line::from(" Confirm signal ").centered())
+        .title_bottom(Line::from(" y: Confirm | n/Esc: Cancel ").centered())
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black));
+    let paragraph = Paragraph::new(message)
+        .alignment(Alignment::Center)
+        .block(block);
+
+    frame.render_widget(paragraph, area);
 }
 
 fn render_help_modal(frame: &mut Frame, scroll_offset: u16) {
@@ -623,26 +738,28 @@ mod tests {
 
     #[test]
     fn test_default_signal_index_is_sigterm() {
-        let (signal, _, _) = AVAILABLE_SIGNALS[DEFAULT_SIGNAL_INDEX];
-        assert_eq!(signal, Signal::SIGTERM);
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.open_signal_selection();
+
+        let Mode::SignalSelect { signal_index } = app.mode else {
+            panic!("Expected SignalSelect mode");
+        };
+        assert_eq!(app.signals[signal_index].signal, Signal::SIGTERM);
     }
 
     #[test]
-    fn test_signals_sorted_by_number() {
-        let numbers: Vec<i32> = AVAILABLE_SIGNALS
+    fn test_signal_options_use_native_numbers_and_order() {
+        let app = App::new(vec![]);
+        let numbers: Vec<i32> = app
+            .signals
             .iter()
-            .map(|(sig, _, _)| *sig as i32)
+            .map(|option| option.signal as i32)
             .collect();
-        for i in 1..numbers.len() {
-            assert!(
-                numbers[i - 1] < numbers[i],
-                "Signal {} (={}) should come before {} (={})",
-                AVAILABLE_SIGNALS[i - 1].1,
-                numbers[i - 1],
-                AVAILABLE_SIGNALS[i].1,
-                numbers[i]
-            );
-        }
+
+        assert!(numbers.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(app.signals.iter().all(|option| {
+            signal_label(option).contains(&format!("({})", option.signal as i32))
+        }));
     }
 
     #[test]
@@ -661,7 +778,7 @@ mod tests {
     fn test_next_signal_wraps_around() {
         let mut app = App::new(vec![mock_port_proc()]);
         app.mode = Mode::SignalSelect {
-            signal_index: AVAILABLE_SIGNALS.len() - 1,
+            signal_index: app.signals.len() - 1,
         };
         app.next_signal();
         if let Mode::SignalSelect { signal_index } = app.mode {
@@ -689,7 +806,7 @@ mod tests {
         app.mode = Mode::SignalSelect { signal_index: 0 };
         app.previous_signal();
         if let Mode::SignalSelect { signal_index } = app.mode {
-            assert_eq!(signal_index, AVAILABLE_SIGNALS.len() - 1);
+            assert_eq!(signal_index, app.signals.len() - 1);
         } else {
             panic!("Expected SignalSelect mode");
         }
@@ -701,5 +818,78 @@ mod tests {
         app.mode = Mode::Normal;
         app.next_signal();
         assert!(matches!(app.mode, Mode::Normal));
+    }
+
+    #[test]
+    fn test_signal_confirmation_snapshots_selected_target() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        let signal_index = app
+            .signals
+            .iter()
+            .position(|option| option.signal == Signal::SIGKILL)
+            .unwrap();
+        app.mode = Mode::SignalSelect { signal_index };
+
+        app.request_signal_confirmation();
+        app.refresh_items(vec![]);
+
+        assert!(matches!(app.mode, Mode::SignalConfirm));
+        let pending = app.pending_signal.as_ref().unwrap();
+        assert_eq!(pending.signal, Signal::SIGKILL);
+        assert_eq!(pending.pid, 1234);
+        assert_eq!(pending.proc_name, "test");
+    }
+
+    #[test]
+    fn test_enter_opens_signal_confirmation() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.open_signal_selection();
+
+        app.handle_signal_selection_key(KeyCode::Enter);
+
+        assert!(matches!(app.mode, Mode::SignalConfirm));
+        assert!(app.pending_signal.is_some());
+    }
+
+    #[test]
+    fn test_signal_confirmation_requires_y() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.open_signal_selection();
+        app.request_signal_confirmation();
+
+        assert!(app.handle_signal_confirmation_key(KeyCode::Enter).is_none());
+        assert!(matches!(app.mode, Mode::SignalConfirm));
+
+        let pending = app.handle_signal_confirmation_key(KeyCode::Char('y'));
+
+        assert_eq!(pending.unwrap().pid, 1234);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.pending_signal.is_none());
+    }
+
+    #[test]
+    fn test_n_cancels_signal_confirmation() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.open_signal_selection();
+        app.request_signal_confirmation();
+
+        let pending = app.handle_signal_confirmation_key(KeyCode::Char('n'));
+
+        assert!(pending.is_none());
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.pending_signal.is_none());
+    }
+
+    #[test]
+    fn test_escape_cancels_signal_confirmation() {
+        let mut app = App::new(vec![mock_port_proc()]);
+        app.open_signal_selection();
+        app.request_signal_confirmation();
+
+        let pending = app.handle_signal_confirmation_key(KeyCode::Esc);
+
+        assert!(pending.is_none());
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.pending_signal.is_none());
     }
 }
