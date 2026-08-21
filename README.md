@@ -8,8 +8,8 @@ A fast, interactive TUI for monitoring which processes are listening on which po
 - **Live filtering** by process name, PID, port, or protocol
 - **Send signals** to processes (SIGTERM, SIGKILL, SIGHUP, SIGINT, and more)
 - **Table view** with sorting and navigation
-- **Auto-refresh** or manual update modes
-- **Linux & macOS** support with automatic backend detection
+- **Run modes** for the interactive TUI, `--once`, and `--interval`
+- **Linux-first** support, with macOS support through `lsof`
 
 ## Installation
 
@@ -37,12 +37,15 @@ portwatch
 ```
 
 **Keybindings:**
+
 - `↑/↓` or `j/k` - Navigate
 - `/` - Filter (search by process, port, etc.)
 - `s` - Send signal to selected process
 - `?` - Show help
 - `Esc` - Clear filter / Cancel action
 - `q` - Quit
+
+> **Safety:** Sending SIGTERM or SIGKILL terminates the selected process and may require elevated permissions. Review the selected PID and process name before confirming.
 
 ### CLI Modes
 
@@ -81,7 +84,7 @@ them to a process simulates a crash rather than controlling it.
 
 One of the following tools must be installed:
 
-- **Linux**: `ss` (from `iproute2`, preferred) or `lsof`
+- **Linux**: `lsof` or `ss` (from `iproute2`)
 - **macOS**: `lsof` (pre-installed)
 
 portwatch will automatically detect and use the available tool.
@@ -100,10 +103,10 @@ sudo pacman -S iproute2
 
 ## Platform Support
 
-- **Linux** (tested on Arch, Ubuntu, Debian)
-- **macOS** (via lsof)
+- **Linux** (primary platform)
+- **macOS** (supported through the `lsof` backend)
 - **Windows** - Use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/)
 
 ## License
 
-MIT
+[MIT](LICENSE)
